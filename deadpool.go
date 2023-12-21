@@ -2,8 +2,6 @@ package deadpool
 
 import (
 	"errors"
-	"fmt"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -144,18 +142,11 @@ func (d *deadpool) SpawnWorker() {
 			d.Execute,
 			func(workerID int32) func() {
 				return func() {
-					if os.Getenv("DEBUG") == "TRUE" {
-						fmt.Printf("starting worker: %v\n", workerID)
-					}
 					d.wg.Add(1)
 				}
 			}(currentWorkersQTY),
 			func(workerID int32) func() {
 				return func() {
-					if os.Getenv("DEBUG") == "TRUE" {
-						fmt.Printf("stoping worker: %v\n", workerID)
-					}
-
 					d.wg.Done()
 				}
 			}(currentWorkersQTY),
