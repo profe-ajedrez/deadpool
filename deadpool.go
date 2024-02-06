@@ -28,6 +28,8 @@ type Pool interface {
 	WorkerSpawned() int32
 	SubmittedTasks() int32
 
+	AddReadyTask(int32)
+
 	OnExecuteTask(time.Time)
 
 	CummlatedWorkTime() time.Duration
@@ -39,6 +41,7 @@ type DefaultExecutor struct{}
 func (e *DefaultExecutor) Execute(task Task, p Pool) {
 	start := time.Now().UTC()
 	defer p.OnExecuteTask(start)
+	defer p.AddReadyTask(1)
 	task.Run()
 }
 
@@ -112,8 +115,11 @@ func New(opts ...func(*deadpool)) (*deadpool, error) {
 	return d, nil
 }
 
+func (d *deadpool) AddReadyTask(qty int32) {
+	atomic.AddInt32(&d.readyTasksQTY, qty)
+}
+
 func (d *deadpool) Submit(task Task) {
-	atomic.AddInt32(&d.readyTasksQTY, 1)
 	d.SpawnWorker()
 	d.tasksStream <- task
 

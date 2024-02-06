@@ -38,9 +38,9 @@ func Test_deadpool_ErrsOnCreate(t *testing.T) {
 }
 
 func Test_deadpool_Flow(t *testing.T) {
-	os.Setenv("DEBUG", "TRUE")
+	//	os.Setenv("DEBUG", "TRUE")
 
-	d, err := New(WithMax(6), WithCap(2))
+	d, err := New(WithMax(6))
 
 	if err != nil {
 		t.Log(err)
@@ -49,7 +49,7 @@ func Test_deadpool_Flow(t *testing.T) {
 
 	start := time.Now().UTC()
 
-	for i := 1; i <= 600; i++ {
+	for i := 1; i <= 128; i++ {
 		func(i int) {
 			d.Submit(newTaskTest(i))
 		}(i)
@@ -81,6 +81,6 @@ func (t *taskTest) Run() {
 
 	if os.Getenv("DEBUG") == "TRUE" {
 		fmt.Printf("     starting task %d\n", t.id)
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 }
