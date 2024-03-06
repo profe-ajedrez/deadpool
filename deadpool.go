@@ -16,7 +16,7 @@ type Executor interface {
 }
 
 type WorkerSpawner interface {
-	Spawn(chan Task, func(Task), func(), func())
+	Spawn(chan Task, chan struct{}, func(Task), func(), func())
 }
 
 type Pool interface {
@@ -28,12 +28,12 @@ type Pool interface {
 	WorkerSpawned() int32
 	SubmittedTasks() int32
 
-	AddReadyTask(int32)
-
 	OnExecuteTask(time.Time)
 
 	CummlatedWorkTime() time.Duration
 	AVGTime() time.Duration
+
+	StopWorkers()
 }
 
 type DefaultExecutor struct{}
@@ -41,45 +41,48 @@ type DefaultExecutor struct{}
 func (e *DefaultExecutor) Execute(task Task, p Pool) {
 	start := time.Now().UTC()
 	defer p.OnExecuteTask(start)
-	defer p.AddReadyTask(1)
 	task.Run()
 }
 
 type DefaultSpawner struct{}
 
-func (s *DefaultSpawner) Spawn(tasks chan Task, executor func(Task), onStart func(), onEnd func()) {
+func (s *DefaultSpawner) Spawn(tasks chan Task, stopWorkers chan struct{}, executor func(Task), onStart func(), onEnd func()) {
 	onStart()
 
 	go func() {
 		defer onEnd()
 
-		for task := range tasks {
-			if task == nil {
+		for {
+			select {
+			case task := <-tasks:
+				if task == nil {
+					return
+				}
+
+				executor(task)
+			case <-stopWorkers:
 				return
 			}
-
-			executor(task)
 		}
+
 	}()
 }
 
 type deadpool struct {
+	executor          Executor
+	spawner           WorkerSpawner
+	recoverer         func()
+	wg                *sync.WaitGroup
+	stopWorkers       chan struct{}
+	tasksStream       chan Task
+	avgTaskTime       time.Duration
+	cummulatedTime    time.Duration
+	mu                sync.Mutex
 	maxWorkers        int32
-	cap               int8
-	currentWorkersQTY int32
-	readyTasksQTY     int32
 	submittedTasksQTY int32
-
-	cummulatedTime time.Duration
-	avgTaskTime    time.Duration
-
-	executor Executor
-	spawner  WorkerSpawner
-
-	tasksStream chan Task
-
-	wg *sync.WaitGroup
-	mu sync.Mutex
+	readyTasksQTY     int32
+	currentWorkersQTY int32
+	cap               int8
 }
 
 func New(opts ...func(*deadpool)) (*deadpool, error) {
@@ -111,19 +114,21 @@ func New(opts ...func(*deadpool)) (*deadpool, error) {
 	}
 
 	d.tasksStream = make(chan Task, d.cap)
+	d.stopWorkers = make(chan struct{})
 
 	return d, nil
 }
 
-func (d *deadpool) AddReadyTask(qty int32) {
-	atomic.AddInt32(&d.readyTasksQTY, qty)
-}
-
 func (d *deadpool) Submit(task Task) {
+	atomic.AddInt32(&d.readyTasksQTY, 1)
 	d.SpawnWorker()
 	d.tasksStream <- task
 
 	atomic.AddInt32(&d.submittedTasksQTY, 1)
+}
+
+func (d *deadpool) StopWorkers() {
+	close(d.stopWorkers)
 }
 
 func (d *deadpool) WaitAll() {
@@ -132,6 +137,7 @@ func (d *deadpool) WaitAll() {
 	}
 
 	d.wg.Wait()
+	d.StopWorkers()
 }
 
 func (d *deadpool) Execute(task Task) {
@@ -145,6 +151,7 @@ func (d *deadpool) SpawnWorker() {
 
 		d.spawner.Spawn(
 			d.tasksStream,
+			d.stopWorkers,
 			d.Execute,
 			func(workerID int32) func() {
 				return func() {
@@ -209,6 +216,16 @@ func WithExecutor(exe Executor) func(*deadpool) {
 func WithSpawner(spn WorkerSpawner) func(*deadpool) {
 	return func(d *deadpool) {
 		d.spawner = spn
+	}
+}
+
+func WithRecoverer(f func()) func(*deadpool) {
+	return func(d *deadpool) {
+		if f != nil {
+			d.recoverer = f
+			return
+		}
+		d.recoverer = func() {}
 	}
 }
 

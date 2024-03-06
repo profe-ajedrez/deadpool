@@ -62,6 +62,25 @@ func Test_deadpool_Flow(t *testing.T) {
 	t.Logf("tiempo total de proceso: %v", time.Since(start))
 }
 
+func Benchmark_deadpool_Flow(b *testing.B) {
+	//	os.Setenv("DEBUG", "TRUE")
+
+	task := newTaskTest(-1)
+
+	for k := 0; k <= b.N; k++ {
+		d, _ := New(WithMax(6))
+		for i := 1; i <= 128; i++ {
+			func(i int) {
+				task.id = i
+				d.Submit(task)
+			}(i)
+		}
+
+		d.WaitAll()
+	}
+
+}
+
 type taskTest struct {
 	id int
 }
